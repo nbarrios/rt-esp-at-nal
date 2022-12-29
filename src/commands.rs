@@ -251,6 +251,26 @@ impl ConnectCommand {
             port: remote.port(),
         }
     }
+
+    /// Establishes a IPv4 UDP "connection"
+    pub fn udp_v4(link_id: usize, remote: SocketAddrV4) -> Self {
+        Self {
+            link_id,
+            connection_type: String::from("UDP"),
+            remote_host: ipv4_to_string(remote.ip()),
+            port: remote.port(),
+        }
+    }
+
+    /// Establishes a IPv6 UDP "connection"
+    pub fn udp_v6(link_id: usize, remote: SocketAddrV6) -> Self {
+        Self {
+            link_id,
+            connection_type: String::from("UDPv6"),
+            remote_host: ipv6_to_string(remote.ip()),
+            port: remote.port(),
+        }
+    }
 }
 
 impl CommandErrorHandler for ConnectCommand {

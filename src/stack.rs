@@ -39,7 +39,7 @@ use crate::commands::{
 use crate::wifi::{Adapter, Session};
 use atat::AtatClient;
 use atat::Error as AtError;
-use embedded_nal::{SocketAddr, TcpClientStack};
+use embedded_nal::{SocketAddr, TcpClientStack, UdpClientStack};
 use fugit_timer::Timer;
 use heapless::Vec;
 
@@ -49,11 +49,13 @@ pub struct Socket {
     /// Unique link id of AT
     #[allow(unused)]
     pub(crate) link_id: usize,
+    #[allow(unused)]
+    pub(crate) socket_addr: Option<SocketAddr>,
 }
 
 impl Socket {
     pub(crate) fn new(link_id: usize) -> Self {
-        Self { link_id }
+        Self { link_id, socket_addr: None }
     }
 }
 
@@ -249,6 +251,141 @@ impl<A: AtatClient, T: Timer<TIMER_HZ>, const TIMER_HZ: u32, const TX_SIZE: usiz
     /// is sent to the ESP-AT but only the internal status is set.
     /// In case of an error (which is returned) the socket is internally set to closed so that it is not lost and can be reused.
     fn close(&mut self, socket: Self::TcpSocket) -> Result<(), Self::Error> {
+        self.process_urc_messages();
+
+        // Socket already closed during restart
+        if self.session.is_socket_closed(&socket) {
+            return Ok(());
+        }
+
+        // Socket is not connected yet or was already closed remotely
+        if self.session.is_socket_closing(&socket) || self.session.is_socket_open(&socket) {
+            self.session.sockets[socket.link_id].state = ConnectionState::Closed;
+            return Ok(());
+        }
+
+        let mut result = self.send_command(CloseSocketCommand::new(socket.link_id));
+        self.process_urc_messages();
+
+        if !self.session.is_socket_closing(&socket) && result.is_ok() {
+            result = Err(Error::UnconfirmedSocketState);
+        }
+
+        // Setting to Closed even on error. Otherwise socket can not be reused in future, as its consumed.
+        self.session.sockets[socket.link_id].state = ConnectionState::Closed;
+
+        result?;
+        Ok(())
+    }
+}
+
+impl<A: AtatClient, T: Timer<TIMER_HZ>, const TIMER_HZ: u32, const TX_SIZE: usize, const RX_SIZE: usize> UdpClientStack
+    for Adapter<A, T, TIMER_HZ, TX_SIZE, RX_SIZE>
+{
+    type UdpSocket = Socket;
+    type Error = Error;
+
+    /// Opens and returns a new socket
+    /// Currently only five parallel sockets are supported. If not socket is available [Error::NoSocketAvailable] is returned.
+    ///
+    /// On first call ESP-AT is configured to support multiple connections.
+    fn socket(&mut self) -> Result<Self::UdpSocket, Self::Error> {
+        self.enable_multiple_connections()?;
+        self.open_socket()
+    }
+
+    /// Opens a new TCP connection. Both IPv4 and IPv6 are supported.
+    /// Returns [Error::AlreadyConnected] if socket is already connected.
+    ///
+    /// On first call ESP-AT is configured for passive socket receiving mode. So receiving data
+    /// is buffered on ESP-AT to a maximum size of around 8192 bytes.
+    fn connect(&mut self, socket: &mut Socket, remote: SocketAddr) -> Result<(), Self::Error> {
+        self.process_urc_messages();
+
+        if self.session.is_socket_connected(socket) {
+            return Result::Err(Error::AlreadyConnected);
+        }
+
+        self.enable_passive_receiving_mode()?;
+        self.session.already_connected = false;
+
+        let command = match remote {
+            SocketAddr::V4(address) => ConnectCommand::udp_v4(socket.link_id, address),
+            SocketAddr::V6(address) => ConnectCommand::udp_v6(socket.link_id, address),
+        };
+        let result = self.send_command(command);
+        self.process_urc_messages();
+
+        // ESP-AT returned that given socket is already connected. This indicates that a URC Connect message was missed.
+        if self.session.already_connected {
+            self.session.sockets[socket.link_id].state = ConnectionState::Connected;
+            return Result::Ok(());
+        }
+        result?;
+
+        if !self.session.is_socket_connected(socket) {
+            return Result::Err(Error::UnconfirmedSocketState);
+        }
+
+        socket.socket_addr = Some(remote);
+        self.session.reset_available_data(socket);
+        Result::Ok(())
+    }
+
+    /// Sends the given buffer and returns the length (in bytes) sent.
+    /// The data is divided into smaller blocks. The block size is determined by the generic constant TX_SIZE.
+    fn send(&mut self, socket: &mut Socket, buffer: &[u8]) -> nb::Result<(), Error> {
+        self.process_urc_messages();
+        self.assert_socket_connected(socket)?;
+
+        for chunk in buffer.chunks(TX_SIZE) {
+            self.send_command(TransmissionPrepareCommand::new(socket.link_id, chunk.len()))?;
+            self.send_chunk(chunk)?;
+        }
+
+        nb::Result::Ok(())
+    }
+
+    /// Receives data (if available) and writes it to the given buffer.
+    ///
+    /// The data is read internally in blocks. The block size is defined by the generic constant RX_SIZE.
+    /// In any case, data is read until the buffer is completely filled or no further data is available.
+    fn receive(&mut self, socket: &mut Self::UdpSocket, buffer: &mut [u8]) -> nb::Result<(usize, SocketAddr), Self::Error> {
+        self.process_urc_messages();
+
+        if !self.session.is_data_available(socket) {
+            return nb::Result::Err(nb::Error::WouldBlock);
+        }
+
+        if socket.socket_addr.is_none() {
+            return nb::Result::Err(nb::Error::Other(Error::SocketUnconnected));
+        }
+
+        let mut buffer: Buffer<RX_SIZE> = Buffer::new(buffer);
+
+        while self.session.is_data_available(socket) && !buffer.is_full() {
+            let command = ReceiveDataCommand::<RX_SIZE>::new(socket.link_id, buffer.get_next_length());
+            self.send_command(command)?;
+            self.process_urc_messages();
+
+            if self.session.data.is_none() {
+                return nb::Result::Err(nb::Error::Other(Error::ReceiveFailed(AtError::InvalidResponse)));
+            }
+
+            let data = self.session.data.take().unwrap();
+            self.session.reduce_available_data(socket, data.len());
+            buffer.append(data)?;
+        }
+
+        nb::Result::Ok((buffer.len(), socket.socket_addr.unwrap()))
+    }
+
+    /// Closes a socket
+    ///
+    /// If the socket has already been closed by the remote side or is not connected, no command
+    /// is sent to the ESP-AT but only the internal status is set.
+    /// In case of an error (which is returned) the socket is internally set to closed so that it is not lost and can be reused.
+    fn close(&mut self, socket: Self::UdpSocket) -> Result<(), Self::Error> {
         self.process_urc_messages();
 
         // Socket already closed during restart
