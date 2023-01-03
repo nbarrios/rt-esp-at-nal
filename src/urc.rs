@@ -220,7 +220,7 @@ impl<'a> LineBasedMatcher<'a> {
     /// True if a regular CRLF terminated URC message was matched
     fn matches_lines_based_urc(&self, line: &str) -> bool {
         line == "ready"
-            || &line[..3] == "AT+"
+            //|| &line[..3] == "AT+" //AtDigester already handles echo, handling here breaks responses
             || &line[..4] == "+IPD"
             || line == "SEND OK"
             || line == "SEND FAIL"
