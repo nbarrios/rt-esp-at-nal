@@ -19,3 +19,13 @@ pub struct LocalAddressResponse {
     /// String encoded address
     pub address: String<64>,
 }
+
+/// UART Config response from UART_CUR command
+#[derive(Clone, AtatResp, Debug)]
+pub struct UartConfigResponse {
+    pub baudrate: u32,
+    pub databits: u8,
+    pub stopbits: u8,
+    pub parity: u8,
+    pub flow_control: u8,
+}

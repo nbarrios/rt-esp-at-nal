@@ -407,3 +407,19 @@ fn test_set_auto_connect_correct_command() {
     assert_eq!("AT+CWAUTOCONN=1\r\n".to_string(), commands[0]);
     assert_eq!("AT+CWAUTOCONN=0\r\n".to_string(), commands[1]);
 }
+
+#[test]
+fn test_get_current_uart_config() {
+    let client = MockAtatClient::new();
+    let timer = MockTimer::new();
+    let mut adapter: AdapterType = Adapter::new(client, timer);
+
+    adapter.client.add_response(b"+UART_CUR:115200,8,1,0,3\r\n");
+
+    let uart_config = adapter.get_current_uart_config().unwrap();
+    assert_eq!(115200, uart_config.baudrate);
+    assert_eq!(8, uart_config.databits);
+    assert_eq!(1, uart_config.stopbits);
+    assert_eq!(0, uart_config.parity);
+    assert_eq!(3, uart_config.flow_control);
+}

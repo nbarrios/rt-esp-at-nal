@@ -1,6 +1,7 @@
 use core::fmt::Write;
 
 use crate::responses::LocalAddressResponse;
+use crate::responses::UartConfigResponse;
 use crate::responses::NoResponse;
 use crate::stack::Error as StackError;
 use crate::wifi::{AddressErrors, CommandError, JoinError};
@@ -398,6 +399,26 @@ impl CommandErrorHandler for CloseSocketCommand {
 pub struct RestartCommand {}
 
 impl CommandErrorHandler for RestartCommand {
+    type Error = CommandError;
+    const WOULD_BLOCK_ERROR: Self::Error = CommandError::UnexpectedWouldBlock;
+
+    fn command_error(&self, error: AtError) -> Self::Error {
+        CommandError::CommandFailed(error)
+    }
+}
+
+/// Get current UART config
+#[derive(Clone, Default, AtatCmd)]
+#[at_cmd("+UART_CUR?", UartConfigResponse, timeout_ms = 5_000)]
+pub struct GetCurrentUartConfig {}
+
+impl GetCurrentUartConfig {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl CommandErrorHandler for GetCurrentUartConfig {
     type Error = CommandError;
     const WOULD_BLOCK_ERROR: Self::Error = CommandError::UnexpectedWouldBlock;
 

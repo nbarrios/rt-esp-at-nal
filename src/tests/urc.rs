@@ -1,6 +1,6 @@
 use crate::commands::{
     AccessPointConnectCommand, ConnectCommand, ObtainLocalAddressCommand, SetMultipleConnectionsCommand,
-    SetSocketReceivingModeCommand, TransmissionPrepareCommand, WifiModeCommand,
+    SetSocketReceivingModeCommand, TransmissionPrepareCommand, WifiModeCommand, GetCurrentUartConfig
 };
 use crate::urc::URCMessages;
 use atat::heapless::String;
@@ -322,6 +322,7 @@ fn test_matching_cmd_echo() {
         SocketAddrV4::from_str("10.0.0.1:5000").unwrap(),
     ));
     assert_cmd_echo_matching(ObtainLocalAddressCommand::new());
+    assert_cmd_echo_matching(GetCurrentUartConfig::new());
 }
 
 fn assert_result(string: &[u8], size: usize, data: &[u8]) {

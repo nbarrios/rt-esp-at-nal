@@ -30,9 +30,9 @@
 //! ````
 use crate::commands::{
     AccessPointConnectCommand, AutoConnectCommand, CommandErrorHandler, ObtainLocalAddressCommand, RestartCommand,
-    SetSocketReceivingModeCommand, WifiModeCommand,
+    SetSocketReceivingModeCommand, WifiModeCommand, GetCurrentUartConfig
 };
-use crate::responses::LocalAddressResponse;
+use crate::responses::{LocalAddressResponse, UartConfigResponse};
 use crate::stack::{ConnectionState, SocketState};
 use crate::urc::URCMessages;
 use atat::heapless::Vec;
@@ -73,6 +73,9 @@ pub trait WifiAdapter {
 
     /// Restarts the module and blocks until ready
     fn restart(&mut self) -> Result<(), Self::RestartError>;
+
+    /// Get current UART config
+    fn get_current_uart_config(&mut self) -> Result<UartConfigResponse, CommandError>;
 }
 
 /// Central client for network communication
@@ -294,6 +297,14 @@ impl<A: AtatClient, T: Timer<TIMER_HZ>, const TIMER_HZ: u32, const TX_SIZE: usiz
 
         Ok(())
     }
+
+    // Get current UART configuration
+    fn get_current_uart_config(&mut self) -> Result<UartConfigResponse, CommandError> {
+        let response = self.send_command(GetCurrentUartConfig::new())?;
+
+        Ok(response)
+    }
+
 }
 
 impl<A: AtatClient, T: Timer<TIMER_HZ>, const TIMER_HZ: u32, const TX_SIZE: usize, const RX_SIZE: usize>
