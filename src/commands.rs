@@ -1,8 +1,8 @@
 use core::fmt::Write;
 
 use crate::responses::LocalAddressResponse;
-use crate::responses::UartConfigResponse;
 use crate::responses::NoResponse;
+use crate::responses::UartConfigResponse;
 use crate::stack::Error as StackError;
 use crate::wifi::{AddressErrors, CommandError, JoinError};
 use atat::atat_derive::AtatCmd;
@@ -395,7 +395,7 @@ impl CommandErrorHandler for CloseSocketCommand {
 
 /// Restarts the module
 #[derive(Clone, Default, AtatCmd)]
-#[at_cmd("+RST", NoResponse, timeout_ms = 1_000)]
+#[at_cmd("+RST", NoResponse, timeout_ms = 2_000)]
 pub struct RestartCommand {}
 
 impl CommandErrorHandler for RestartCommand {
